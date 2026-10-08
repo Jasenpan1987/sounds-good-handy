@@ -1,3 +1,101 @@
+# About this fork
+
+This is a personal proof-of-concept fork of [Handy](https://github.com/cjpais/Handy), made for **Sounds Good**, a voice-input tool for people who mix Chinese and English in one sentence. It adds one thing to Handy: a **Speech Server** model that sends each recording to your own speech-to-text server instead of running a model on the Mac. That suits Macs that can't spare the memory to keep a local model loaded.
+
+It is built and run locally. Nothing is published, signed or released. The fork's changes live on the `feat/speech-server` branch. The original Handy README follows the divider below, unchanged.
+
+> **Privacy:** upstream Handy keeps everything on your computer. When the Speech Server model is selected, every recording, plus your Custom Words, goes to the server you configure. Only point it at a server you control, and only for content you're allowed to send there. Every other model still runs locally as before.
+
+## What changed
+
+- **A Speech Server model.** It is listed with the other models, always shows as installed, and has no size or delete button. Selecting it loads nothing into memory.
+- **Settings → Advanced → Speech Server**, with three fields:
+  - **Server URL:** a base URL (`https://host`), `https://host/v1`, or the full `/v1/audio/transcriptions` endpoint.
+  - **Model Name:** sent as `model`. Defaults to `Qwen/Qwen3-ASR-1.7B`.
+  - **Key File:** a file holding the bearer key. Defaults to `~/.config/asr/key`, and surrounding whitespace is trimmed. The key itself is never stored in Handy's settings.
+- **The request**, which follows the OpenAI transcription API: `POST /v1/audio/transcriptions`, `multipart/form-data`, `Authorization: Bearer <key>`. The fields are:
+  - `file`: the recording as 16 kHz mono 16-bit WAV.
+  - `model`, `response_format=json`, `temperature=0`.
+  - `prompt`: your Custom Words joined with `", "`, when there are any. Qwen3-ASR reads it as context. In testing, this is what made English terms such as "merge" come back in English inside Chinese sentences. For this model, Handy's ASCII-only fuzzy correction is skipped, as it already is for Whisper, because the words have gone to the server.
+  - `language`: only when a language other than Auto is selected (`zh-Hans` and `zh-Hant` are sent as `zh`). It is omitted for Auto because Qwen3-ASR forces its output language when one is given, which breaks mixed Chinese-English speech.
+
+  The server must answer with JSON containing `text`.
+
+- **Latency and reliability:**
+  - The connection is opened as recording starts, so a dictation doesn't wait for a TLS handshake.
+  - Pooled connections stay open for 240 s.
+  - Timeouts are 5 s to connect and 30 s for the whole request.
+  - A failed connection is retried once. Nothing reached the server in that case, so it can't be transcribed twice.
+- **Readable errors:** for a missing URL or key file, 401 (key), 404 (URL or model name), 413 (recording too long), and 502/503/504 (server stopped or still starting).
+- **The self-updater is forced off.** Its endpoint serves upstream Handy releases, and installing one would replace this build and drop the Speech Server model.
+- UI strings exist in every locale: Chinese (Simplified and Traditional) translated, the rest in English.
+
+## Building it locally
+
+You need Rust (stable), [Bun](https://bun.sh/), CMake and the Xcode Command Line Tools.
+
+```bash
+bun install
+mkdir -p src-tauri/resources/models
+curl -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.computer/silero_vad_v4.onnx
+CMAKE_POLICY_VERSION_MINIMUM=3.5 bun run tauri build --bundles app \
+  --config '{"bundle":{"createUpdaterArtifacts":false}}'
+```
+
+The app lands at `src-tauri/target/release/bundle/macos/Handy.app`. `createUpdaterArtifacts` is switched off because those artifacts need upstream's signing key.
+
+To set it up:
+
+1. Grant Microphone and Accessibility access when asked.
+2. Pick **Speech Server** as the model.
+3. Fill in the Server URL under Settings → Advanced → Speech Server, and put the key in the key file.
+4. Add the English terms you use to **Custom Words**.
+
+## Known caveats
+
+- **Accessibility access drops after every rebuild.** The build is ad-hoc signed, so macOS treats each build as a new app. The toggle may still look on while pasting fails. Fix it in System Settings → Privacy & Security → Accessibility: remove Handy with **−**, then add the new build with **+**.
+- **Same name and bundle identifier as upstream** (`Handy`, `com.pais.handy`). Don't install upstream Handy alongside this build, because the two would share settings and permissions.
+- **On a machine with only the Command Line Tools** (no full Xcode), Apple Intelligence post-processing is built as a stub. The local transcribe-cpp GPU worker was also seen failing to start within 60 s at launch. Both affect only local models and post-processing, not the Speech Server.
+
+## Tests
+
+```bash
+cd src-tauri
+CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo test --lib remote_asr
+```
+
+These run against a local socket and cover:
+
+- URL handling, the language and prompt fields, WAV encoding, and the key file.
+- The exact request sent, and error statuses (checking the key never shows up in an error).
+- The connection retry.
+- A regression test for a deadlock that left the overlay on "Transcribing…" when `transcribe` ran on a Tauri runtime task.
+
+An ignored test calls a real server with a 16 kHz WAV clip. Only use made-up clips with a server outside your control:
+
+```bash
+REMOTE_ASR_URL=https://your-server REMOTE_ASR_CLIP=clip.wav \
+  CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo test --lib live_server -- --ignored --nocapture
+```
+
+`REMOTE_ASR_KEY_FILE` overrides the key file, and `REMOTE_ASR_WORDS` takes a comma-separated word list.
+
+## Where the code is
+
+| File                                                                                                | Change                                                                          |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `src-tauri/src/remote_asr.rs`                                                                       | New: the request, WAV encoding, warm-up, retry, errors, tests                   |
+| `src-tauri/src/managers/transcription.rs`                                                           | Treats the speech server as a loaded engine and routes transcriptions to it     |
+| `src-tauri/src/managers/model.rs`                                                                   | `EngineType::Remote` and the built-in `speech-server` entry                     |
+| `src-tauri/src/settings.rs`                                                                         | `remote_asr_url`, `remote_asr_model`, `remote_asr_key_file`; updater forced off |
+| `src-tauri/src/shortcut/mod.rs`, `src-tauri/src/lib.rs`                                             | Setting commands and their registration                                         |
+| `src-tauri/Cargo.toml`                                                                              | reqwest's `multipart` feature (no new crates)                                   |
+| `src/components/settings/SpeechServer.tsx`, `src/components/settings/advanced/AdvancedSettings.tsx` | The settings fields                                                             |
+| `src/components/onboarding/ModelCard.tsx`                                                           | Hides size and delete for the speech server                                     |
+| `src/stores/settingsStore.ts`, `src/bindings.ts`, `src/i18n/locales/*`                              | Store wiring, generated bindings, strings                                       |
+
+---
+
 # Handy
 
 [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)
