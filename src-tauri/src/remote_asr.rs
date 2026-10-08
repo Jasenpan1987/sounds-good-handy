@@ -10,7 +10,6 @@
 
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -60,21 +59,22 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-/// Runs `fut` on Tauri's async runtime and waits for it on the calling thread.
-/// `transcribe` is synchronous and is called from inside that runtime, where
-/// `block_on` would panic; the long-lived runtime also keeps the client's
-/// pooled connections alive between dictations.
+/// Drives `fut` to completion on a fresh thread inside Tauri's async runtime.
+///
+/// `transcribe` is synchronous and the app calls it from a task on that
+/// runtime's worker. `block_on` there would panic, and spawning the future then
+/// blocking the worker deadlocks: tokio puts a task spawned from a worker in
+/// that worker's LIFO slot, which no other worker steals. A thread of our own
+/// avoids both, and the connections the client opens still live on the
+/// long-lived runtime, so they stay pooled between dictations.
 fn wait_on_runtime<F, T>(fut: F) -> Result<T>
 where
     F: std::future::Future<Output = Result<T>> + Send + 'static,
     T: Send + 'static,
 {
-    let (tx, rx) = mpsc::channel();
-    tauri::async_runtime::spawn(async move {
-        let _ = tx.send(fut.await);
-    });
-    rx.recv()
-        .map_err(|_| anyhow!("The speech server request was dropped"))?
+    std::thread::spawn(move || tauri::async_runtime::block_on(fut))
+        .join()
+        .map_err(|_| anyhow!("The speech server request thread panicked"))?
 }
 
 /// Accepts `https://host`, `https://host/v1`, or the full endpoint.
@@ -402,6 +402,35 @@ mod tests {
             custom_words: vec!["UVAP".to_string(), "merge".to_string()],
             language: "auto".to_string(),
         }
+    }
+
+    /// The app calls `transcribe` from a task on Tauri's runtime (actions.rs).
+    /// Regression: spawning the request from that worker and blocking it hung
+    /// forever with "Transcribing..." on screen, past every timeout.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn transcribe_called_from_a_tauri_runtime_task_completes() {
+        let body = r#"{"text":"ok"}"#;
+        let reply: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .into_boxed_str(),
+        );
+        let (base, server) = one_shot_server(reply).await;
+        let mut key_file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(key_file, "test-key").unwrap();
+        let request = request_for(base, &key_file);
+
+        let task = tauri::async_runtime::spawn(async move { transcribe(&request, &[0.0; 160]) });
+        let text = tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .expect("transcribe deadlocked on the runtime worker")
+            .unwrap()
+            .unwrap();
+        assert_eq!(text, "ok");
+        server.await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
