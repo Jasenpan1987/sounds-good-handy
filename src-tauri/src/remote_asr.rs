@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use hound::{WavSpec, WavWriter};
-use log::{debug, info};
+use log::{debug, info, warn};
 use reqwest::multipart::{Form, Part};
 use reqwest::{StatusCode, Url};
 use serde::Deserialize;
@@ -208,32 +208,52 @@ pub fn transcribe(request: &RemoteAsrRequest, samples: &[f32]) -> Result<String>
 
     let started = std::time::Instant::now();
     let text = wait_on_runtime(async move {
-        let mut form = Form::new()
-            .part(
-                "file",
-                Part::bytes(wav)
-                    .file_name("audio.wav")
-                    .mime_str("audio/wav")?,
-            )
-            .text("response_format", "json")
-            .text("temperature", "0");
-        if !model.is_empty() {
-            form = form.text("model", model);
-        }
-        if let Some(prompt) = prompt {
-            form = form.text("prompt", prompt);
-        }
-        if let Some(language) = language {
-            form = form.text("language", language);
-        }
+        // A multipart body is consumed by sending, so each attempt builds its own.
+        let build_form = || -> Result<Form> {
+            let mut form = Form::new()
+                .part(
+                    "file",
+                    Part::bytes(wav.clone())
+                        .file_name("audio.wav")
+                        .mime_str("audio/wav")?,
+                )
+                .text("response_format", "json")
+                .text("temperature", "0");
+            if !model.is_empty() {
+                form = form.text("model", model.clone());
+            }
+            if let Some(prompt) = &prompt {
+                form = form.text("prompt", prompt.clone());
+            }
+            if let Some(language) = &language {
+                form = form.text("language", language.clone());
+            }
+            Ok(form)
+        };
 
-        let response = client()
-            .post(url.clone())
-            .bearer_auth(key)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| anyhow!(describe_reqwest_error(&url, &e)))?;
+        // One retry, only when the connection itself failed: nothing reached the
+        // server, so the dictation can't be transcribed twice. Seen in practice
+        // as a lone connect timeout to a distant server between healthy requests.
+        let mut attempt = 1;
+        let response = loop {
+            match client()
+                .post(url.clone())
+                .bearer_auth(&key)
+                .multipart(build_form()?)
+                .send()
+                .await
+            {
+                Ok(response) => break response,
+                Err(e) if e.is_connect() && attempt == 1 => {
+                    warn!(
+                        "Speech server connection failed, retrying once: {}",
+                        describe_reqwest_error(&url, &e)
+                    );
+                    attempt += 1;
+                }
+                Err(e) => return Err(anyhow!(describe_reqwest_error(&url, &e))),
+            }
+        };
         let status = response.status();
         let body = response
             .text()
@@ -462,6 +482,26 @@ mod tests {
         let text = transcribe(&request, &samples).unwrap();
         println!("{:.2}s: {text}", started.elapsed().as_secs_f64());
         assert!(!text.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_refused_connection_is_reported_as_unreachable_after_the_retry() {
+        // Bind and drop to get a local port that nothing listens on.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut key_file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(key_file, "test-key").unwrap();
+        let request = request_for(format!("http://127.0.0.1:{port}"), &key_file);
+
+        let error = tokio::task::spawn_blocking(move || transcribe(&request, &[0.0; 160]))
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Could not connect"), "{error}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
