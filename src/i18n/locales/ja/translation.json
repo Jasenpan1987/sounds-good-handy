@@ -94,6 +94,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "大型で低速ですが、非常に高精度な多言語モデル。"
+      },
+      "speech-server": {
+        "name": "Speech Server",
+        "description": "Sends each recording to your own speech-to-text server. Set it up in Advanced → Speech Server."
       }
     },
     "errors": {
@@ -264,7 +268,8 @@
         "output": "出力",
         "transcription": "文字起こし",
         "history": "履歴",
-        "experimental": "実験的"
+        "experimental": "実験的",
+        "speechServer": "Speech Server"
       },
       "experimentalToggle": {
         "label": "実験的な機能",
@@ -406,6 +411,20 @@
           "asTranscribed": "文字起こしのまま",
           "simplified": "簡体字",
           "traditional": "繁体字"
+        }
+      },
+      "speechServer": {
+        "url": {
+          "title": "Server URL",
+          "description": "Address of an OpenAI-compatible speech-to-text server. Used when the Speech Server model is selected."
+        },
+        "model": {
+          "title": "Model Name",
+          "description": "The model name the server expects."
+        },
+        "keyFile": {
+          "title": "Key File",
+          "description": "Path to a file holding the server's API key. The key itself is never stored in the settings."
         }
       }
     },

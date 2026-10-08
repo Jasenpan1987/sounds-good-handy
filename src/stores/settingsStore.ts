@@ -139,6 +139,12 @@ const settingUpdaters: {
   custom_words: (value) => commands.updateCustomWords(value as string[]),
   word_correction_threshold: (value) =>
     commands.changeWordCorrectionThresholdSetting(value as number),
+  remote_asr_url: (value) =>
+    commands.changeRemoteAsrUrlSetting(value as string),
+  remote_asr_model: (value) =>
+    commands.changeRemoteAsrModelSetting(value as string),
+  remote_asr_key_file: (value) =>
+    commands.changeRemoteAsrKeyFileSetting(value as string),
   paste_delay_ms: (value) =>
     commands.changePasteDelayMsSetting(value as number),
   paste_delay_after_ms: (value) =>

@@ -94,6 +94,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "大型模型，速度較慢，但多語言辨識非常準確。"
+      },
+      "speech-server": {
+        "name": "語音伺服器",
+        "description": "把每段錄音傳到你自己的語音轉文字伺服器。在「進階 → 語音伺服器」裡設定。"
       }
     },
     "errors": {
@@ -264,7 +268,8 @@
         "output": "輸出",
         "transcription": "轉錄",
         "history": "歷史",
-        "experimental": "實驗性"
+        "experimental": "實驗性",
+        "speechServer": "語音伺服器"
       },
       "experimentalToggle": {
         "label": "實驗性功能",
@@ -406,6 +411,20 @@
           "asTranscribed": "保持原樣",
           "simplified": "簡體",
           "traditional": "繁體"
+        }
+      },
+      "speechServer": {
+        "url": {
+          "title": "伺服器位址",
+          "description": "相容 OpenAI 介面的語音轉文字伺服器位址。選擇「語音伺服器」模型時使用。"
+        },
+        "model": {
+          "title": "模型名稱",
+          "description": "伺服器要求的模型名稱。"
+        },
+        "keyFile": {
+          "title": "Key 檔案",
+          "description": "存放伺服器 API key 的檔案路徑。key 本身不會儲存在設定裡。"
         }
       }
     },

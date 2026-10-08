@@ -133,6 +133,30 @@ async changeWordCorrectionThresholdSetting(threshold: number) : Promise<Result<n
     else return { status: "error", error: e  as any };
 }
 },
+async changeRemoteAsrUrlSetting(url: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_remote_asr_url_setting", { url }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async changeRemoteAsrModelSetting(model: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_remote_asr_model_setting", { model }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async changeRemoteAsrKeyFileSetting(path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_remote_asr_key_file_setting", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async changeExtraRecordingBufferSetting(ms: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_extra_recording_buffer_setting", { ms }) };
@@ -998,6 +1022,16 @@ selected_channel?: number | null; clamshell_microphone?: string | null; selected
  */
 reliable_paste?: boolean; typing_tool?: TypingTool; external_script_path?: string | null; filler_word_removal_enabled?: boolean; custom_filler_words?: string[] | null; 
 /**
+ * Speech server used by the "Speech server" model (`remote_asr`): a base
+ * URL or the full `/v1/audio/transcriptions` endpoint.
+ */
+remote_asr_url?: string; remote_asr_model?: string; 
+/**
+ * File holding the server's bearer key, so the key never sits in this
+ * settings store.
+ */
+remote_asr_key_file?: string; 
+/**
  * Fresh installs default from the OS locale; existing stores are migrated
  * in `apply_settings_migrations`.
  */
@@ -1039,7 +1073,12 @@ export type EngineType =
  * Voxtral, Qwen3-ASR, Nemotron, …). The architecture is auto-detected from
  * the file, so this one variant covers the whole transcribe-cpp family.
  */
-"TranscribeCpp" | "Parakeet" | "Moonshine" | "MoonshineStreaming" | "SenseVoice" | "GigaAM" | "Canary" | "Cohere"
+"TranscribeCpp" | "Parakeet" | "Moonshine" | "MoonshineStreaming" | "SenseVoice" | "GigaAM" | "Canary" | "Cohere" | 
+/**
+ * No local model: recordings go to the OpenAI-compatible speech server in
+ * settings (see `remote_asr`).
+ */
+"Remote"
 export type GpuDeviceOption = { id: string; name: string; total_vram_mb: number }
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null; post_process_requested: boolean }
 export type HistoryUpdatePayload = { action: "added"; entry: HistoryEntry } | { action: "updated"; entry: HistoryEntry } | { action: "deleted"; id: number } | { action: "toggled"; id: number }

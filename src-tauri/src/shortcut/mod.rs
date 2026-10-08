@@ -900,6 +900,33 @@ pub fn change_word_correction_threshold_setting(
 
 #[tauri::command]
 #[specta::specta]
+pub fn change_remote_asr_url_setting(app: AppHandle, url: String) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.remote_asr_url = url;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_remote_asr_model_setting(app: AppHandle, model: String) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.remote_asr_model = model;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_remote_asr_key_file_setting(app: AppHandle, path: String) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.remote_asr_key_file = path;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_extra_recording_buffer_setting(app: AppHandle, ms: u64) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
     settings.extra_recording_buffer_ms = ms;

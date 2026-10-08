@@ -94,6 +94,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "Een groot, trager, maar zeer nauwkeurig meertalig model."
+      },
+      "speech-server": {
+        "name": "Speech Server",
+        "description": "Sends each recording to your own speech-to-text server. Set it up in Advanced → Speech Server."
       }
     },
     "errors": {
@@ -264,7 +268,8 @@
         "output": "Uitvoer",
         "transcription": "Transcriptie",
         "history": "Geschiedenis",
-        "experimental": "Experimenteel"
+        "experimental": "Experimenteel",
+        "speechServer": "Speech Server"
       },
       "experimentalToggle": {
         "label": "Experimentele functies",
@@ -406,6 +411,20 @@
           "asTranscribed": "Zoals getranscribeerd",
           "simplified": "Vereenvoudigd",
           "traditional": "Traditioneel"
+        }
+      },
+      "speechServer": {
+        "url": {
+          "title": "Server URL",
+          "description": "Address of an OpenAI-compatible speech-to-text server. Used when the Speech Server model is selected."
+        },
+        "model": {
+          "title": "Model Name",
+          "description": "The model name the server expects."
+        },
+        "keyFile": {
+          "title": "Key File",
+          "description": "Path to a file holding the server's API key. The key itself is never stored in the settings."
         }
       }
     },

@@ -273,6 +273,9 @@ pub struct TranscriptionManager {
     /// yet. This prevents a second worker from starting after finalize/cancel
     /// closes the router but before the first worker has fully exited.
     active_stream_worker: Arc<AtomicU64>,
+    /// True while the speech server is the selected "model". It holds nothing
+    /// in memory; "loaded" only means transcriptions go to `remote_asr`.
+    remote_loaded: Arc<AtomicBool>,
 }
 
 impl TranscriptionManager {
@@ -293,6 +296,7 @@ impl TranscriptionManager {
             stream_active: Arc::new(AtomicBool::new(false)),
             next_stream_worker_id: Arc::new(AtomicU64::new(1)),
             active_stream_worker: Arc::new(AtomicU64::new(0)),
+            remote_loaded: Arc::new(AtomicBool::new(false)),
         };
 
         // Start the idle watcher
@@ -380,7 +384,9 @@ impl TranscriptionManager {
     pub fn is_model_loaded(&self) -> bool {
         // A transcribe-cpp model stays loaded while it is busy, so a batch
         // run or stream in progress never reads as "unloaded".
-        self.engine.loaded().is_some() || self.lock_onnx().is_some()
+        self.engine.loaded().is_some()
+            || self.lock_onnx().is_some()
+            || self.remote_loaded.load(Ordering::Acquire)
     }
 
     /// Accelerator changes should not disturb the current transcription. Mark
@@ -472,6 +478,7 @@ impl TranscriptionManager {
         let unloading = self.engine.unload();
         // Dropping an ONNX engine frees its resources.
         *self.lock_onnx() = None;
+        self.remote_loaded.store(false, Ordering::Release);
         {
             let mut current_model = self.current_model_id.lock().unwrap();
             *current_model = None;
@@ -582,10 +589,13 @@ impl TranscriptionManager {
             return Err(anyhow::anyhow!(error_msg));
         }
 
-        let model_path = self
-            .model_manager
-            .get_model_path(model_id)
-            .inspect_err(|error| emit_loading_failed(&error.to_string()))?;
+        let model_path = if matches!(model_info.engine_type, EngineType::Remote) {
+            std::path::PathBuf::new()
+        } else {
+            self.model_manager
+                .get_model_path(model_id)
+                .inspect_err(|error| emit_loading_failed(&error.to_string()))?
+        };
 
         // Drop the current engine BEFORE building the new one so the previous
         // model is freed first — avoids holding two models at once (peak memory
@@ -593,6 +603,7 @@ impl TranscriptionManager {
         // way. Clear the id too: if the new load fails, status should read "no
         // loaded model", not the dropped engine.
         *self.lock_onnx() = None;
+        self.remote_loaded.store(false, Ordering::Release);
         if !matches!(model_info.engine_type, EngineType::TranscribeCpp) {
             self.engine.unload().wait();
         }
@@ -741,6 +752,11 @@ impl TranscriptionManager {
                 })?;
                 Some(OnnxEngine::Cohere(engine))
             }
+            EngineType::Remote => {
+                self.remote_loaded.store(true, Ordering::Release);
+                crate::remote_asr::warm_up(&get_settings(&self.app_handle).remote_asr_url);
+                None
+            }
         };
 
         // Update the current engine and model ID
@@ -782,6 +798,11 @@ impl TranscriptionManager {
 
         let reload_pending = self.reload_model_on_next_use.load(Ordering::Acquire);
         if !reload_pending && self.is_model_loaded() {
+            // Called as recording starts: reopen the connection while the
+            // user speaks, in case the pooled one has timed out.
+            if self.remote_loaded.load(Ordering::Acquire) {
+                crate::remote_asr::warm_up(&get_settings(&self.app_handle).remote_asr_url);
+            }
             return;
         }
 
@@ -816,6 +837,9 @@ impl TranscriptionManager {
     pub fn current_backend(&self) -> Option<String> {
         if let Some(info) = self.engine.loaded() {
             return Some(info.backend);
+        }
+        if self.remote_loaded.load(Ordering::Acquire) {
+            return Some("remote".to_string());
         }
         self.lock_onnx().as_ref().map(|_| "onnx".to_string())
     }
@@ -1186,9 +1210,13 @@ impl TranscriptionManager {
         }
 
         // Perform transcription with the appropriate engine.
+        let remote = self.remote_loaded.load(Ordering::Acquire);
         let run = match self.engine.loaded() {
             Some(info) => {
                 self.transcribe_cpp(info, audio, &settings, &validated_language, &active_model)?
+            }
+            None if remote => {
+                self.transcribe_remote(&audio, &settings, &validated_language, &active_model)?
             }
             None => self.transcribe_onnx(&audio, &settings, &validated_language, &active_model)?,
         };
@@ -1209,10 +1237,12 @@ impl TranscriptionManager {
         // family). We don't pass a prompt to non-whisper models (it requires the
         // whisper-kind run extension), so they still get fuzzy correction here,
         // same as the ONNX engines.
+        // The speech server gets the custom words as its prompt too, so the
+        // ASCII-only fuzzy pass is skipped there as it is for whisper.
         let filtered_result = post_process_transcription_text(
             run.text,
             &settings,
-            run.model_is_whisper,
+            run.model_is_whisper || remote,
             &output_language,
             &run.languages,
         );
@@ -1343,6 +1373,39 @@ impl TranscriptionManager {
     }
 
     /// In-process ONNX engines.
+    /// The speech server. It reports no detected language, so output-language
+    /// evidence comes from the user's selection, as for most ONNX engines.
+    fn transcribe_remote(
+        &self,
+        audio: &[f32],
+        settings: &AppSettings,
+        validated_language: &str,
+        active_model: &str,
+    ) -> Result<RunOutcome> {
+        let request = crate::remote_asr::RemoteAsrRequest {
+            url: settings.remote_asr_url.clone(),
+            model: settings.remote_asr_model.clone(),
+            key_file: settings.remote_asr_key_file.clone(),
+            custom_words: settings.custom_words.clone(),
+            language: validated_language.to_string(),
+        };
+        let text = crate::remote_asr::transcribe(&request, audio)?;
+        let languages = self
+            .model_manager
+            .get_model_info(active_model)
+            .map(|info| info.supported_languages)
+            .unwrap_or_default();
+        Ok(RunOutcome {
+            text,
+            languages,
+            applied_language_hint: (validated_language != "auto")
+                .then(|| validated_language.to_string()),
+            output_was_translated: false,
+            model_detected_language: None,
+            model_is_whisper: false,
+        })
+    }
+
     fn transcribe_onnx(
         &self,
         audio: &[f32],

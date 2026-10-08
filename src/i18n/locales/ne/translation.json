@@ -94,6 +94,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "ठूलो, अलि ढिलो, तर धेरै सटीक बहुभाषिक मोडेल।"
+      },
+      "speech-server": {
+        "name": "Speech Server",
+        "description": "Sends each recording to your own speech-to-text server. Set it up in Advanced → Speech Server."
       }
     },
     "errors": {
@@ -264,7 +268,8 @@
         "output": "आउटपुट",
         "transcription": "ट्रान्सक्रिप्सन",
         "history": "हिस्ट्री",
-        "experimental": "प्रयोगात्मक"
+        "experimental": "प्रयोगात्मक",
+        "speechServer": "Speech Server"
       },
       "experimentalToggle": {
         "label": "प्रयोगात्मक सुविधाहरू",
@@ -406,6 +411,20 @@
           "asTranscribed": "ट्रान्सक्राइब भए अनुसार",
           "simplified": "सरलीकृत",
           "traditional": "परम्परागत"
+        }
+      },
+      "speechServer": {
+        "url": {
+          "title": "Server URL",
+          "description": "Address of an OpenAI-compatible speech-to-text server. Used when the Speech Server model is selected."
+        },
+        "model": {
+          "title": "Model Name",
+          "description": "The model name the server expects."
+        },
+        "keyFile": {
+          "title": "Key File",
+          "description": "Path to a file holding the server's API key. The key itself is never stored in the settings."
         }
       }
     },

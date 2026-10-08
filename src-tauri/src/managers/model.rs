@@ -36,7 +36,13 @@ pub enum EngineType {
     GigaAM,
     Canary,
     Cohere,
+    /// No local model: recordings go to the OpenAI-compatible speech server in
+    /// settings (see `remote_asr`).
+    Remote,
 }
+
+/// Id of the single built-in [`EngineType::Remote`] entry.
+pub const REMOTE_MODEL_ID: &str = "speech-server";
 
 /// Where a model comes from and how Handy obtains it — the routing discriminant
 /// for downloading and on-disk resolution.
@@ -1142,6 +1148,33 @@ impl ModelManager {
             },
         );
 
+        // Nothing to download: always "on disk", configured in Advanced settings.
+        available_models.insert(
+            REMOTE_MODEL_ID.to_string(),
+            ModelInfo {
+                id: REMOTE_MODEL_ID.to_string(),
+                name: "Speech Server".to_string(),
+                description: "Sends each recording to your own speech-to-text server. Set it up in Advanced → Speech Server.".to_string(),
+                filename: String::new(),
+                source: ModelSource::Local,
+                size_mb: 0,
+                is_downloaded: true,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: false,
+                engine_type: EngineType::Remote,
+                accuracy_score: 0.90,
+                speed_score: 0.80,
+                supports_translation: false,
+                is_recommended: false,
+                supported_languages: vec!["en".to_string(), "zh".to_string()],
+                supports_language_selection: true,
+                is_custom: false,
+                supports_streaming: false,
+                supports_language_detection: true,
+            },
+        );
+
         // Seed the bundled offline catalog before the on-disk scans, so a model
         // already in the HF cache dedups onto its richer catalog entry (the scans
         // only insert ids not already present) instead of showing as a bare cache
@@ -1407,6 +1440,9 @@ impl ModelManager {
         let mut vanished_models: Vec<String> = Vec::new();
 
         for model in models.values_mut() {
+            if matches!(model.engine_type, EngineType::Remote) {
+                continue;
+            }
             if let ModelSource::HuggingFace { repo_id, revision } = &model.source {
                 // A models-dir copy counts too: mirror-fallback downloads land
                 // there, and it makes manual drop-ins of catalog files work.
@@ -2427,6 +2463,10 @@ impl ModelManager {
 
         let model_info =
             model_info.ok_or_else(|| anyhow::anyhow!("Model not found: {}", model_id))?;
+
+        if matches!(model_info.engine_type, EngineType::Remote) {
+            return Err(anyhow::anyhow!("The speech server has no files to delete"));
+        }
 
         debug!("ModelManager: Found model info: {:?}", model_info);
 

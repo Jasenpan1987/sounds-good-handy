@@ -1,4 +1,3 @@
-use crate::utils;
 use log::{debug, warn};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -502,6 +501,16 @@ pub struct AppSettings {
     pub filler_word_removal_enabled: bool,
     #[serde(default)]
     pub custom_filler_words: Option<Vec<String>>,
+    /// Speech server used by the "Speech server" model (`remote_asr`): a base
+    /// URL or the full `/v1/audio/transcriptions` endpoint.
+    #[serde(default)]
+    pub remote_asr_url: String,
+    #[serde(default = "default_remote_asr_model")]
+    pub remote_asr_model: String,
+    /// File holding the server's bearer key, so the key never sits in this
+    /// settings store.
+    #[serde(default = "default_remote_asr_key_file")]
+    pub remote_asr_key_file: String,
     /// Fresh installs default from the OS locale; existing stores are migrated
     /// in `apply_settings_migrations`.
     #[serde(default)]
@@ -617,6 +626,14 @@ fn default_log_level() -> LogLevel {
 
 fn default_word_correction_threshold() -> f64 {
     0.18
+}
+
+fn default_remote_asr_model() -> String {
+    "Qwen/Qwen3-ASR-1.7B".to_string()
+}
+
+fn default_remote_asr_key_file() -> String {
+    "~/.config/asr/key".to_string()
 }
 
 fn default_paste_delay_ms() -> u64 {
@@ -985,6 +1002,9 @@ pub fn get_default_settings() -> AppSettings {
         external_script_path: None,
         filler_word_removal_enabled: default_filler_word_removal_enabled(),
         custom_filler_words: None,
+        remote_asr_url: String::new(),
+        remote_asr_model: default_remote_asr_model(),
+        remote_asr_key_file: default_remote_asr_key_file(),
         chinese_script: default_chinese_script(),
         transcribe_accelerator: TranscribeAcceleratorSetting::default(),
         ort_accelerator: OrtAcceleratorSetting::default(),
@@ -1231,10 +1251,12 @@ fn apply_settings_migrations(
 /// Update checks are forced off (without touching the persisted setting) when
 /// `HANDY_DISABLE_UPDATER` is set — e.g. by the Nix package, since self-update
 /// can't work against an immutable /nix/store install.
+///
+/// This fork forces them off unconditionally: the updater endpoint serves
+/// upstream Handy releases, and installing one would replace this build and
+/// drop the speech server engine.
 pub fn update_checks_forced_disabled() -> bool {
-    use std::sync::OnceLock;
-    static IS_UPDATER_DISABLED: OnceLock<bool> = OnceLock::new();
-    *IS_UPDATER_DISABLED.get_or_init(|| utils::env_flag_enabled("HANDY_DISABLE_UPDATER"))
+    true
 }
 
 /// Effective updater state: the user's stored preference, overridden to `false`

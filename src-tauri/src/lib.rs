@@ -18,6 +18,7 @@ mod memory;
 mod overlay;
 mod paste_tx;
 pub mod portable;
+mod remote_asr;
 mod secure_input;
 mod settings;
 mod shortcut;
@@ -667,6 +668,9 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_overlay_style_setting,
             shortcut::change_debug_mode_setting,
             shortcut::change_word_correction_threshold_setting,
+            shortcut::change_remote_asr_url_setting,
+            shortcut::change_remote_asr_model_setting,
+            shortcut::change_remote_asr_key_file_setting,
             shortcut::change_extra_recording_buffer_setting,
             shortcut::change_paste_delay_ms_setting,
             shortcut::change_paste_delay_after_ms_setting,
